@@ -1,0 +1,5 @@
+requests==2.31.0
+PyJWT==2.8.0
+cryptography==42.0.5
+beautifulsoup4==4.12.3
+lxml==5.1.0

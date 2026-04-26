@@ -3,7 +3,7 @@
 Bot de Casa de Cambio — Telegram + Google Sheets
 """
 
-import os, json, logging, requests, re
+import os, json, logging, requests, re, threading
 from datetime import datetime
 
 # ─── CONFIG ────────────────────────────────────────────────────────────────────

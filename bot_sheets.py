@@ -230,13 +230,15 @@ def main():
                     "• /deptos — buscar ahora en Palermo Chico\n\n"
                     "/saldo — saldo USD en caja\n"
                     "/ayuda — este mensaje")
+            elif texto.startswith("/saldo"):
+                send(chat_id, f"🏦 <b>Saldo USD en caja:</b> {state['saldo_usd']:,.2f}\n📊 Operaciones: {state['op_counter']}")
             elif texto.startswith("/deptos"):
-                send(chat_id, "🔍 Buscando departamentos en Palermo Chico...")
+                send(chat_id, "🔍 Buscando oportunidades en Palermo Chico...")
                 nuevas = check_propiedades()
                 if not nuevas:
-                    send(chat_id, "😴 Sin novedades en Palermo Chico por ahora.\nTe aviso a las 9 AM si aparece algo nuevo.")
+                    send(chat_id, "😴 Sin oportunidades nuevas por ahora.\nTe aviso a las 9 AM si aparece algo.")
                 else:
-                    send(chat_id, f"🏠 <b>{len(nuevas)} departamento(s) nuevo(s)</b>")
+                    send(chat_id, f"🏠 <b>{len(nuevas)} oportunidad(es) encontrada(s)</b>")
                     for p in nuevas[:5]:
                         precio_fmt = f"USD {p['precio']:,}".replace(",", ".")
                         send(chat_id,
@@ -244,8 +246,6 @@ def main():
                             f"💰 {precio_fmt} | 🛏 {p['ambientes']} amb | 🚗 Cochera\n"
                             f"✅ {p.get('motivo','Oportunidad')}\n"
                             f"🔗 <a href='{p['link']}'>Ver publicación</a>")
-            elif texto.startswith("/saldo"):
-                send(chat_id, f"🏦 <b>Saldo USD en caja:</b> {state['saldo_usd']:,.2f}\n📊 Operaciones: {state['op_counter']}")
             else:
                 send(chat_id, "⏳ Procesando...")
                 op = parsear(texto)

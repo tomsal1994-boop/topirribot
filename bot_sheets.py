@@ -51,7 +51,7 @@ def get_sheets_token():
 
 def sheets_append(values: list):
     token = get_sheets_token()
-    url = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values/Sheet1!A1:append"
+    url = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values/Operaciones!A1:append"
     params = {"valueInputOption": "USER_ENTERED", "insertDataOption": "INSERT_ROWS"}
     body = {"values": [values]}
     res = requests.post(url, headers={"Authorization": f"Bearer {token}"}, params=params, json=body)

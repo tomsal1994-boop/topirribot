@@ -16,10 +16,11 @@ STATE_FILE      = "/tmp/state.json"
 SEEN_FILE       = "/tmp/seen_listings.json"
 POLL_INTERVAL   = 2
 AUTHORIZED_CHAT = 813807479
-PRECIO_MAX      = 600000
-PRECIO_MIN      = 80000
-PRECIO_M2_MAX   = 3200
-HORA_ALERTA     = 9
+PRECIO_MAX        = 600000
+PRECIO_MIN        = 80000
+PRECIO_M2_PALERMO = 3200   # USD/m2 max Palermo Chico
+PRECIO_M2_RECOLETA= 2800   # USD/m2 max Recoleta
+HORA_ALERTA       = 9
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", handlers=[logging.StreamHandler()])
 log = logging.getLogger(__name__)
@@ -171,22 +172,67 @@ def scrape_argenprop():
     except Exception as e: log.warning(f"AP: {e}")
     return res
 
+
+def scrape_zonaprop_recoleta():
+    res = []
+    for amb in [3,4,5]:
+        try:
+            r = requests.get(f"https://www.zonaprop.com.ar/departamentos-venta-recoleta-{amb}-dormitorios-con-cochera-precio-hasta-{PRECIO_MAX}usd.html", headers=HEADERS_HTTP, timeout=15)
+            soup = BeautifulSoup(r.text, "html.parser")
+            for card in soup.select("[data-id]"):
+                pid = card.get("data-id","")
+                if not pid: continue
+                pe = card.select_one("[data-price]"); precio = int(pe.get("data-price","0")) if pe else 0
+                le = card.select_one("a[href]"); href = le["href"] if le else ""
+                link = f"https://www.zonaprop.com.ar{href}" if href.startswith("/") else href
+                te = card.select_one(".postingCardTitle,h2,.title"); titulo = te.get_text(strip=True) if te else f"{amb} amb Recoleta"
+                de = card.select_one(".postingCardDescription,.description"); desc = de.get_text(strip=True)[:300] if de else ""
+                se = card.select_one("[data-surface]"); sup = se.get("data-surface","") if se else ""
+                if PRECIO_MIN <= precio <= PRECIO_MAX:
+                    res.append({"id":f"zp_rec_{pid}","fuente":"Zonaprop","titulo":titulo,"precio":precio,"link":link,"ambientes":amb,"descripcion":desc,"superficie":sup,"zona":"recoleta"})
+        except Exception as e: log.warning(f"ZP Recoleta: {e}")
+    return res
+
+def scrape_argenprop_recoleta():
+    res = []
+    try:
+        r = requests.get(f"https://www.argenprop.com/departamentos/venta/barrio-recoleta?cochera=true&ambientes=3,4,5&precio-hasta={PRECIO_MAX}", headers=HEADERS_HTTP, timeout=15)
+        soup = BeautifulSoup(r.text, "html.parser")
+        for card in soup.select(".listing__item,[class*='listing-item']"):
+            le = card.select_one("a[href]")
+            if not le: continue
+            href = le["href"]; pid = hashlib.md5(href.encode()).hexdigest()[:12]
+            link = f"https://www.argenprop.com{href}" if href.startswith("/") else href
+            pe = card.select_one("[class*='price'],.price"); pt = pe.get_text(strip=True) if pe else ""
+            precio = 0
+            for p in pt.replace(".","").replace(",","").split():
+                if p.isdigit() and len(p)>=5: precio=int(p); break
+            te = card.select_one("h2,h3,[class*='title']"); titulo = te.get_text(strip=True) if te else "Depto Recoleta"
+            de = card.select_one("[class*='description'],p"); desc = de.get_text(strip=True)[:300] if de else ""
+            if PRECIO_MIN <= precio <= PRECIO_MAX:
+                res.append({"id":f"ap_rec_{pid}","fuente":"Argenprop","titulo":titulo,"precio":precio,"link":link,"ambientes":"3/4/5","descripcion":desc,"superficie":"","zona":"recoleta"})
+    except Exception as e: log.warning(f"AP Recoleta: {e}")
+    return res
+
 def es_oportunidad(prop):
     texto = ((prop.get("titulo") or "") + " " + (prop.get("descripcion") or "")).lower()
-    keywords = ["oportunidad","urgente","liquido","liquida","dueño directo","dueno directo","sin intermediarios","rebajado","gran oportunidad","remate","bajo precio","negociable","oferta","precio reducido"]
+    keywords = ["oportunidad","urgente","liquido","liquida","dueño directo","dueno directo","sin intermediarios","rebajado","gran oportunidad","remate","bajo precio","negociable","oferta","precio reducido","luminoso","buena luz","muy luminoso"]
     kw = any(k in texto for k in keywords)
+    zona = prop.get("zona","palermo")
+    pm2_limite = PRECIO_M2_RECOLETA if zona == "recoleta" else PRECIO_M2_PALERMO
     pm2_bajo = False; pm2 = None
     try:
         sup = float(''.join(c for c in str(prop.get("superficie","")) if c.isdigit() or c=='.'))
         if sup > 0 and prop.get("precio",0) > 0:
-            pm2 = round(prop["precio"] / sup); pm2_bajo = pm2 < PRECIO_M2_MAX
+            pm2 = round(prop["precio"] / sup); pm2_bajo = pm2 < pm2_limite
     except: pass
     motivo = ("🏷 Dice oportunidad" if kw else "") + ((" | " if kw else "") + f"📉 USD {pm2}/m²" if pm2_bajo else "")
     return (kw or pm2_bajo), motivo
 
 def check_propiedades():
     seen = load_seen(); nuevas = []
-    for prop in scrape_zonaprop() + scrape_argenprop():
+    todas = scrape_zonaprop() + scrape_argenprop() + scrape_zonaprop_recoleta() + scrape_argenprop_recoleta()
+    for prop in todas:
         if prop["id"] not in seen:
             seen.add(prop["id"])
             ok, motivo = es_oportunidad(prop)
@@ -195,8 +241,9 @@ def check_propiedades():
 
 def msg_depto(p):
     pf = f"USD {p['precio']:,}".replace(",",".")
+    zona_emoji = "🌳 Palermo Chico" if p.get("zona","palermo") != "recoleta" else "🏛 Recoleta"
     return (f"🏠 <b>{p['titulo'][:70]}</b>\n💰 {pf} | 🛏 {p['ambientes']} amb | 🚗 Cochera\n"
-            f"✅ {p.get('motivo','Oportunidad')}\n📍 Palermo Chico — {p['fuente']}\n"
+            f"✅ {p.get('motivo','Oportunidad')}\n📍 {zona_emoji} — {p['fuente']}\n"
             f"🔗 <a href='{p['link']}'>Ver publicación</a>")
 
 def alertas_loop():

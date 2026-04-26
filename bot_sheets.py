@@ -51,11 +51,11 @@ def get_sheets_token():
 
 def sheets_append(values: list):
     token = get_sheets_token()
-    url = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values/A:N:append"
+    url = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values/Sheet1!A1:append"
     params = {"valueInputOption": "USER_ENTERED", "insertDataOption": "INSERT_ROWS"}
     body = {"values": [values]}
     res = requests.post(url, headers={"Authorization": f"Bearer {token}"}, params=params, json=body)
-    log.info(f"Sheets append: {res.status_code}")
+    log.info(f"Sheets append: {res.status_code} - {res.text[:200]}")
     return res.status_code == 200
 
 def sheets_setup():
@@ -108,12 +108,14 @@ SYSTEM_PROMPT = """Sos un asistente para una casa de cambio argentina.
 Analizá el mensaje y extraé la operación. Respondé SOLO con JSON válido, sin texto extra ni backticks.
 
 Formato:
-{"tipo":"COMPRA o VENTA","divisa":"USD/EUR/BRL/etc","monto":numero,"tipo_cambio":numero,"cliente":"nombre o Sin nombre","observaciones":"extra o vacio","valido":true/false}
+{"tipo":"COMPRA o VENTA","divisa":"USD/EUR/BRL/etc","monto":numero,"tipo_cambio":numero,"ganancia":numero o null,"cliente":"nombre o Sin nombre","observaciones":"extra o vacio","valido":true/false}
 
+- ganancia: monto en pesos que el operador dice que ganó. Si no se menciona, poner null.
 COMPRA = cliente trae divisas, vos das pesos. VENTA = cliente pide divisas, vos las vendés.
 Ejemplos:
-"vendí 10k usd a 1250" → tipo:VENTA, divisa:USD, monto:10000, tipo_cambio:1250, valido:true
-"compré 500 euros a Juan a 1380" → tipo:COMPRA, divisa:EUR, monto:500, tipo_cambio:1380, cliente:Juan, valido:true
+"vendí 10k usd a 1250 gané 5000" → tipo:VENTA, divisa:USD, monto:10000, tipo_cambio:1250, ganancia:5000, valido:true
+"compré 500 euros a Juan a 1380 gané 2500" → tipo:COMPRA, divisa:EUR, monto:500, tipo_cambio:1380, ganancia:2500, cliente:Juan, valido:true
+"vendí 1000 usd a 1280" → tipo:VENTA, divisa:USD, monto:1000, tipo_cambio:1280, ganancia:null, valido:true
 "hola" → valido:false"""
 
 def parsear(texto):
@@ -139,14 +141,12 @@ def parsear(texto):
         return None
 
 # ─── REGISTRAR OPERACIÓN ───────────────────────────────────────────────────────
-COM_PCT = 1.5  # porcentaje de comisión
 
 def registrar(op, state):
     monto     = float(op["monto"])
     tc        = float(op["tipo_cambio"])
     total_ars = round(monto * tc, 2)
-    com_ars   = round(total_ars * COM_PCT / 100, 2)
-    ganancia  = com_ars
+    ganancia  = float(op["ganancia"]) if op.get("ganancia") else None
 
     if op["tipo"] == "COMPRA":
         state["saldo_usd"] = round(state["saldo_usd"] + monto, 2)
@@ -167,15 +167,13 @@ def registrar(op, state):
         tc,
         total_ars,
         op.get("cliente", "Sin nombre"),
-        COM_PCT,
-        com_ars,
-        ganancia,
+        ganancia if ganancia is not None else "",
         state["saldo_usd"],
         op.get("observaciones", ""),
     ]
 
     ok = sheets_append(fila)
-    return {"op_id": op_id, "total_ars": total_ars, "com_ars": com_ars,
+    return {"op_id": op_id, "total_ars": total_ars,
             "ganancia": ganancia, "saldo_usd": state["saldo_usd"], "sheets_ok": ok}
 
 def msg_confirmacion(op, calc):
@@ -186,8 +184,7 @@ def msg_confirmacion(op, calc):
         f"💱 <b>{op['divisa']}</b>: {op['monto']:,.2f} @ ${op['tipo_cambio']:,.2f}\n"
         f"💵 Total ARS: <b>${calc['total_ars']:,.2f}</b>\n"
         f"👤 Cliente: {op.get('cliente','Sin nombre')}\n"
-        f"💼 Comisión ({COM_PCT}%): ${calc['com_ars']:,.2f}\n"
-        f"📈 Ganancia: <b>${calc['ganancia']:,.2f}</b>\n"
+        f"📈 Ganancia: <b>${calc['ganancia']:,.2f}</b>\n" if calc.get('ganancia') else "📈 Ganancia: no registrada\n"
         f"🏦 Saldo USD caja: <b>{calc['saldo_usd']:,.2f}</b>\n\n"
         f"{sheets_status} 📊\n"
         f"🕐 {datetime.now().strftime('%d/%m/%Y %H:%M')}"

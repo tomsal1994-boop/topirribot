@@ -17,7 +17,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 # ─── CONFIG ────────────────────────────────────────────────────────────────────
 TELEGRAM_TOKEN  = os.getenv("TELEGRAM_TOKEN", "8794992146:AAG5hZxAE0pIDTF6fxl-It11aZtRM1lEKzg")
 ANTHROPIC_KEY   = os.getenv("ANTHROPIC_API_KEY", "TU_ANTHROPIC_KEY_AQUI")
-EXCEL_FILE      = Path(os.getenv("EXCEL_PATH", str(Path(__file__).parent / "operaciones.xlsx")))
+EXCEL_FILE      = Path("/tmp/operaciones.xlsx")
 STATE_FILE      = Path(__file__).parent / "state.json"
 POLL_INTERVAL   = 2  # segundos entre polls
 AUTHORIZED_CHAT = 813807479  # Solo Tomas Salgado
@@ -30,6 +30,62 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ─── ESTADO ────────────────────────────────────────────────────────────────────
+
+def crear_excel_si_no_existe():
+    if EXCEL_FILE.exists():
+        return
+    from openpyxl import Workbook
+    from openpyxl.utils import get_column_letter
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Operaciones"
+    AZUL_OSC = "1E3A5F"; AZUL_MED = "2E6DA4"; GRIS_CLARO = "F2F5F9"; BLANCO = "FFFFFF"; GRIS_BORDE = "CFD8DC"
+    from openpyxl.styles import Side, Border
+    def tb():
+        s = Side(style="thin", color=GRIS_BORDE)
+        return Border(left=s, right=s, top=s, bottom=s)
+    ws.merge_cells("A1:N1"); ws["A1"] = "REGISTRO DE OPERACIONES — CASA DE CAMBIO"
+    ws["A1"].font = Font(name="Arial", bold=True, size=14, color=BLANCO)
+    ws["A1"].fill = PatternFill("solid", fgColor=AZUL_OSC)
+    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 32
+    headers = [("A","ID",8),("B","FECHA",13),("C","HORA",8),("D","TIPO",9),("E","DIVISA",9),
+               ("F","MONTO",14),("G","TIPO CAMBIO",13),("H","TOTAL ARS",15),("I","CLIENTE",18),
+               ("J","COMISION %",12),("K","COMISION ARS",14),("L","GANANCIA ARS",14),("M","SALDO USD",13),("N","OBSERVACIONES",22)]
+    for col_letter, label, width in headers:
+        c = ws[f"{col_letter}4"]; c.value = label
+        c.font = Font(name="Arial", bold=True, size=10, color=BLANCO)
+        c.fill = PatternFill("solid", fgColor=AZUL_MED)
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        c.border = tb(); ws.column_dimensions[col_letter].width = width
+    ws.row_dimensions[4].height = 28
+    for row in range(5, 1005):
+        fill_color = GRIS_CLARO if row % 2 == 0 else BLANCO
+        for col in range(1, 15):
+            c = ws.cell(row=row, column=col); c.border = tb()
+            c.font = Font(name="Arial", size=10); c.fill = PatternFill("solid", fgColor=fill_color)
+            c.alignment = Alignment(horizontal="center", vertical="center")
+    ws.freeze_panes = "A5"; ws.auto_filter.ref = "A4:N4"
+    ws2 = wb.create_sheet("Resumen"); ws2.merge_cells("A1:F1"); ws2["A1"] = "RESUMEN DIARIO"
+    ws2["A1"].font = Font(name="Arial", bold=True, size=13, color=BLANCO)
+    ws2["A1"].fill = PatternFill("solid", fgColor=AZUL_OSC)
+    ws2["A1"].alignment = Alignment(horizontal="center", vertical="center"); ws2.row_dimensions[1].height = 28
+    rh = [("FECHA",14),("OP. COMPRA",12),("OP. VENTA",12),("TOTAL ARS MOVIDO",18),("COMISION ARS",15),("GANANCIA ARS",15)]
+    for i,(h,w) in enumerate(rh,1):
+        c = ws2.cell(row=2,column=i,value=h); c.font = Font(name="Arial",bold=True,size=10,color=BLANCO)
+        c.fill = PatternFill("solid",fgColor=AZUL_MED); c.alignment = Alignment(horizontal="center"); c.border = tb()
+        ws2.column_dimensions[get_column_letter(i)].width = w
+    ws3 = wb.create_sheet("Config"); ws3.merge_cells("A1:B1"); ws3["A1"] = "CONFIGURACION"
+    ws3["A1"].font = Font(name="Arial",bold=True,size=12,color=BLANCO)
+    ws3["A1"].fill = PatternFill("solid",fgColor=AZUL_OSC); ws3["A1"].alignment = Alignment(horizontal="center")
+    ws3.column_dimensions["A"].width = 24; ws3.column_dimensions["B"].width = 22
+    for i,(k,v) in enumerate([("Comision compra (%)",1.5),("Comision venta (%)",1.5),("Saldo inicial USD",0),("Empresa","Mi Casa de Cambio")],3):
+        ck = ws3.cell(row=i,column=1,value=k); ck.font = Font(name="Arial",bold=True,size=10); ck.border = tb()
+        cv = ws3.cell(row=i,column=2,value=v); cv.font = Font(name="Arial",size=10,color="0000FF")
+        cv.fill = PatternFill("solid",fgColor="FFFDE7"); cv.border = tb()
+    wb.save(EXCEL_FILE)
+    print(f"Excel creado en {EXCEL_FILE}")
+
 def load_state() -> dict:
     if STATE_FILE.exists():
         return json.loads(STATE_FILE.read_text())
@@ -246,6 +302,7 @@ def cmd_ayuda(chat_id):
 
 # ─── LOOP PRINCIPAL ────────────────────────────────────────────────────────────
 def main():
+    crear_excel_si_no_existe()
     state = load_state()
     log.info("🏦 Bot Casa de Cambio iniciado")
 

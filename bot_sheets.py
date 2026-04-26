@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 import os, json, logging, requests, re, threading, hashlib
 from datetime import datetime
-from bs4 import BeautifulSoup
+try:
+    from bs4 import BeautifulSoup
+except ImportError:
+    import subprocess, sys
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "beautifulsoup4", "lxml", "-q"])
+    from bs4 import BeautifulSoup
 
 TELEGRAM_TOKEN  = os.getenv("TELEGRAM_TOKEN", "8794992146:AAG5hZxAE0pIDTF6fxl-It11aZtRM1lEKzg")
 ANTHROPIC_KEY   = os.getenv("ANTHROPIC_API_KEY", "")

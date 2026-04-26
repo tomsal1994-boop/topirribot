@@ -51,7 +51,7 @@ def get_sheets_token():
 
 def sheets_append(values: list):
     token = get_sheets_token()
-    url = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values/Operaciones!A:N:append"
+    url = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values/A:N:append"
     params = {"valueInputOption": "USER_ENTERED", "insertDataOption": "INSERT_ROWS"}
     body = {"values": [values]}
     res = requests.post(url, headers={"Authorization": f"Bearer {token}"}, params=params, json=body)
@@ -63,12 +63,12 @@ def sheets_setup():
     try:
         token = get_sheets_token()
         # Leer A1
-        url = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values/Operaciones!A1"
+        url = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values/A1"
         res = requests.get(url, headers={"Authorization": f"Bearer {token}"})
         data = res.json()
         if "values" not in data:
             # Escribir headers
-            headers_url = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values/Operaciones!A1:N1"
+            headers_url = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values/A1:N1"
             headers = [["ID","FECHA","HORA","TIPO","DIVISA","MONTO","TIPO CAMBIO","TOTAL ARS",
                         "CLIENTE","COMISION %","COMISION ARS","GANANCIA ARS","SALDO USD","OBSERVACIONES"]]
             requests.put(headers_url,

@@ -85,14 +85,19 @@ def parsear_operacion(texto: str) -> dict | None:
                 "content-type": "application/json",
             },
             json={
-                "model": "claude-sonnet-4-20250514",
+                "model": "claude-haiku-4-5-20251001",
                 "max_tokens": 300,
                 "system": SYSTEM_PROMPT,
                 "messages": [{"role": "user", "content": texto}],
             },
             timeout=20,
         )
-        raw = res.json()["content"][0]["text"].strip()
+        data = res.json()
+        log.info(f"API response status: {res.status_code}")
+        if "content" not in data:
+            log.error(f"API error response: {data}")
+            return None
+        raw = data["content"][0]["text"].strip()
         # Limpiar posibles backticks
         raw = re.sub(r"```json|```", "", raw).strip()
         return json.loads(raw)

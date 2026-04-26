@@ -154,7 +154,8 @@ def scrape_zonaprop():
 def scrape_argenprop():
     res = []
     try:
-        r = requests.get(f"https://www.argenprop.com/departamentos/venta/barrio-palermo-chico?cochera=true&ambientes=2,3,4&precio-hasta={PRECIO_MAX}", headers=HEADERS_HTTP, timeout=15)
+        s = requests.Session(); s.max_redirects = 5
+        r = s.get(f"https://www.argenprop.com/departamentos/venta/barrio-palermo-chico?cochera=true&ambientes=2,3,4&precio-hasta={PRECIO_MAX}", headers=HEADERS_HTTP, timeout=15, allow_redirects=True)
         soup = BeautifulSoup(r.text, "html.parser")
         for card in soup.select(".listing__item,[class*='listing-item']"):
             le = card.select_one("a[href]");
@@ -196,7 +197,8 @@ def scrape_zonaprop_recoleta():
 def scrape_argenprop_recoleta():
     res = []
     try:
-        r = requests.get(f"https://www.argenprop.com/departamentos/venta/barrio-recoleta?cochera=true&ambientes=3,4,5&precio-hasta={PRECIO_MAX}", headers=HEADERS_HTTP, timeout=15)
+        s = requests.Session(); s.max_redirects = 5
+        r = s.get(f"https://www.argenprop.com/departamentos/venta/barrio-recoleta?cochera=true&ambientes=3,4,5&precio-hasta={PRECIO_MAX}", headers=HEADERS_HTTP, timeout=15, allow_redirects=True)
         soup = BeautifulSoup(r.text, "html.parser")
         for card in soup.select(".listing__item,[class*='listing-item']"):
             le = card.select_one("a[href]")
@@ -231,8 +233,16 @@ def es_oportunidad(prop):
 
 def check_propiedades():
     seen = load_seen(); nuevas = []
-    todas = scrape_zonaprop() + scrape_argenprop() + scrape_zonaprop_recoleta() + scrape_argenprop_recoleta()
-    for prop in todas:
+    fuentes = []
+    try: fuentes += scrape_zonaprop()
+    except Exception as e: log.warning(f"scrape_zonaprop: {e}")
+    try: fuentes += scrape_argenprop()
+    except Exception as e: log.warning(f"scrape_argenprop: {e}")
+    try: fuentes += scrape_zonaprop_recoleta()
+    except Exception as e: log.warning(f"scrape_zonaprop_recoleta: {e}")
+    try: fuentes += scrape_argenprop_recoleta()
+    except Exception as e: log.warning(f"scrape_argenprop_recoleta: {e}")
+    for prop in fuentes:
         if prop["id"] not in seen:
             seen.add(prop["id"])
             ok, motivo = es_oportunidad(prop)
@@ -285,10 +295,16 @@ def main():
             elif texto.startswith("/deptos"):
                 send(chat_id, "🔍 Buscando oportunidades en Palermo Chico...")
                 nuevas = check_propiedades()
-                if not nuevas: send(chat_id, "😴 Sin oportunidades nuevas.\nTe aviso a las 9 AM si aparece algo.")
+                if not nuevas:
+                    send(chat_id, "😴 Sin oportunidades nuevas en Palermo Chico ni Recoleta.\nTe aviso a las 9 AM si aparece algo.")
                 else:
-                    send(chat_id, f"🏠 <b>{len(nuevas)} oportunidad(es)</b>")
-                    for p in nuevas[:5]: send(chat_id, msg_depto(p)); time.sleep(0.5)
+                    palermo = [p for p in nuevas if p.get("zona","palermo") != "recoleta"]
+                    recoleta = [p for p in nuevas if p.get("zona") == "recoleta"]
+                    resumen = f"🏠 <b>{len(nuevas)} oportunidad(es)</b>"
+                    if palermo: resumen += f"\n🌳 Palermo Chico: {len(palermo)}"
+                    if recoleta: resumen += f"\n🏛 Recoleta: {len(recoleta)}"
+                    send(chat_id, resumen)
+                    for p in nuevas[:6]: send(chat_id, msg_depto(p)); time.sleep(0.5)
             elif texto.startswith("/saldo"):
                 send(chat_id, f"🏦 <b>Saldo USD:</b> {state['saldo_usd']:,.2f}\n📊 Operaciones: {state['op_counter']}")
             else:

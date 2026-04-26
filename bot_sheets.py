@@ -131,7 +131,9 @@ def parsear(texto):
             log.error(f"API error: {data}")
             return None
         raw = re.sub(r"```json|```", "", data["content"][0]["text"]).strip()
-        return json.loads(raw)
+        parsed = json.loads(raw)
+        if isinstance(parsed, list): parsed = parsed[0] if parsed else None
+        return parsed
     except Exception as e:
         log.error(f"Error parseando: {e}")
         return None

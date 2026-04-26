@@ -193,9 +193,11 @@ def msg_confirmacion(op, calc):
 # ─── LOOP PRINCIPAL ────────────────────────────────────────────────────────────
 def main():
     import time
-    log.info("🏦 Bot Casa de Cambio iniciado")
+    log.info("🏦 Bot Casa de Cambio + Alertas Palermo Chico iniciado")
     sheets_setup()
     state = load_state()
+    t = threading.Thread(target=alertas_loop, daemon=True)
+    t.start()
 
     while True:
         try:
@@ -220,12 +222,28 @@ def main():
 
             if texto.startswith("/start") or texto.startswith("/ayuda"):
                 send(chat_id,
-                    "🤖 <b>Bot Casa de Cambio</b>\n\n"
-                    "Escribí en texto libre:\n"
+                    "🤖 <b>Bot Topirri</b>\n\n"
+                    "<b>💱 Cambio:</b>\n"
                     "• <i>vendí 5000 usd a 1280</i>\n"
-                    "• <i>compré 200 euros a Juan a 1390</i>\n\n"
-                    "/saldo — ver saldo USD en caja\n"
+                    "• <i>compré 200 euros a Juan a 1390 gané 3000</i>\n\n"
+                    "<b>🏠 Inmuebles:</b>\n"
+                    "• /deptos — buscar ahora en Palermo Chico\n\n"
+                    "/saldo — saldo USD en caja\n"
                     "/ayuda — este mensaje")
+            elif texto.startswith("/deptos"):
+                send(chat_id, "🔍 Buscando departamentos en Palermo Chico...")
+                nuevas = check_propiedades()
+                if not nuevas:
+                    send(chat_id, "😴 Sin novedades en Palermo Chico por ahora.\nTe aviso a las 9 AM si aparece algo nuevo.")
+                else:
+                    send(chat_id, f"🏠 <b>{len(nuevas)} departamento(s) nuevo(s)</b>")
+                    for p in nuevas[:5]:
+                        precio_fmt = f"USD {p['precio']:,}".replace(",", ".")
+                        send(chat_id,
+                            f"🏠 <b>{p['titulo'][:60]}</b>\n"
+                            f"💰 {precio_fmt} | 🛏 {p['ambientes']} amb | 🚗 Cochera\n"
+                            f"✅ {p.get('motivo','Oportunidad')}\n"
+                            f"🔗 <a href='{p['link']}'>Ver publicación</a>")
             elif texto.startswith("/saldo"):
                 send(chat_id, f"🏦 <b>Saldo USD en caja:</b> {state['saldo_usd']:,.2f}\n📊 Operaciones: {state['op_counter']}")
             else:

@@ -315,6 +315,148 @@ def msg_depto(p):
             f"✅ {p.get('motivo','Oportunidad')}\n📍 {zona_emoji} — {p['fuente']}\n"
             f"🔗 <a href='{p['link']}'>Ver publicación</a>")
 
+def scrape_openinsider():
+    resultados = []
+    try:
+        url = "http://openinsider.com/screener?s=&o=&pl=&ph=&ll=&lh=&fd=30&fdr=&td=0&tdr=&fdlyl=&fdlyh=&daysago=&xp=1&vl=100&vh=&ocl=&och=&sic1=-1&sicl=100&sich=9999&grp=0&nfl=&nfh=&nil=&nih=&nol=&noh=&v2l=&v2h=&oc2l=&oc2h=&sortcol=0&cnt=20&action=1"
+        r = requests.get(url, headers=HEADERS_HTTP, timeout=15)
+        soup = BeautifulSoup(r.text, "html.parser")
+        tabla = soup.select_one("table.tinytable")
+        if not tabla:
+            return []
+        for fila in tabla.select("tbody tr")[:20]:
+            celdas = fila.select("td")
+            if len(celdas) < 12: continue
+            try:
+                ticker = celdas[3].get_text(strip=True)
+                cargo = celdas[6].get_text(strip=True)
+                fecha = celdas[1].get_text(strip=True)
+                precio = celdas[8].get_text(strip=True)
+                qty = celdas[9].get_text(strip=True)
+                valor_raw = celdas[10].get_text(strip=True).replace('$','').replace(',','').replace('+','').strip()
+                valor_num = float(valor_raw or 0)
+                link_el = celdas[3].select_one("a")
+                link = f"http://openinsider.com{link_el['href']}" if link_el and link_el.get('href') else f"http://openinsider.com/search?q={ticker}"
+                if valor_num >= 100000:
+                    resultados.append({"ticker":ticker,"cargo":cargo,"fecha":fecha,"precio_compra":precio,"cantidad":qty,"valor_usd":valor_num,"link":link})
+            except: continue
+    except Exception as e: log.warning(f"OpenInsider: {e}")
+    return resultados
+
+def get_precio_actual(ticker):
+    try:
+        r = requests.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=1d", headers={"User-Agent":"Mozilla/5.0"}, timeout=8)
+        return round(r.json()["chart"]["result"][0]["meta"]["regularMarketPrice"], 2)
+    except: return None
+
+def get_insiders_claude(insiders_raw):
+    if not insiders_raw: return []
+    try:
+        prompt = f"""Analizá estas compras de insiders recientes (>100k USD, últimos 30 días) y seleccioná las 6 más relevantes:
+{json.dumps(insiders_raw[:15], indent=2)}
+Priorizá: montos grandes, CEOs/CFOs, empresas conocidas, compras múltiples.
+Respondé SOLO con JSON array sin texto extra:
+[{{"ticker":"X","cargo":"CEO","nombre_insider":"Nombre","fecha":"2026-04-01","precio_compra":"50.00","valor_usd":500000,"contexto":"Por qué es relevante esta compra","link":"http://openinsider.com/..."}}]"""
+        res = requests.post("https://api.anthropic.com/v1/messages",
+            headers={"x-api-key":ANTHROPIC_KEY,"anthropic-version":"2023-06-01","content-type":"application/json"},
+            json={"model":"claude-haiku-4-5-20251001","max_tokens":2000,"messages":[{"role":"user","content":prompt}]},
+            timeout=30)
+        data = res.json()
+        if "content" not in data: return []
+        raw = re.sub(r"```json|```","",data["content"][0]["text"]).strip()
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, list) else []
+    except Exception as e: log.error(f"get_insiders_claude: {e}"); return []
+
+def formato_insider(ins, idx):
+    ticker = ins.get("ticker","?"); cargo = ins.get("cargo","?")
+    nombre = ins.get("nombre_insider", ins.get("nombre","?")); fecha = ins.get("fecha","?")
+    precio_compra = ins.get("precio_compra","?"); valor = ins.get("valor_usd",0)
+    contexto = ins.get("contexto",""); link = ins.get("link","")
+    precio_actual = get_precio_actual(ticker)
+    try:
+        pc = float(str(precio_compra).replace('$','').replace(',',''))
+        diff = round(((precio_actual - pc) / pc) * 100, 1) if precio_actual else None
+        precio_txt = f"${pc:.2f} → actual ${precio_actual} ({'+' if diff>=0 else ''}{diff}%)" if diff is not None else f"Compra: ${precio_compra}"
+    except: precio_txt = f"Compra: ${precio_compra}"
+    return (f"{'🟢' if idx<=2 else '🔵'} <b>{ticker}</b> — {cargo}\n"
+            f"👤 {nombre} | 📅 {fecha}\n"
+            f"💰 USD {valor:,.0f} | 📈 {precio_txt}\n"
+            f"💡 {contexto}\n"
+            f"🔗 <a href='{link}'>Ver en OpenInsider</a>")
+
+def enviar_alertas_insiders():
+    import time
+    log.info("Buscando insiders...")
+    insiders_raw = scrape_openinsider()
+    log.info(f"OpenInsider: {len(insiders_raw)} compras")
+    if not insiders_raw:
+        send(AUTHORIZED_CHAT, "📊 <b>Insider Trading</b>\n\n😴 Sin compras >100k hoy.\n🔗 <a href='http://openinsider.com'>Ver manualmente</a>")
+        return
+    top6 = get_insiders_claude(insiders_raw) or insiders_raw[:6]
+    send(AUTHORIZED_CHAT, f"📊 <b>Top Insiders Comprando — {datetime.now().strftime('%d/%m/%Y')}</b>\nCompras >USD 100k | Últimos 30 días | Fuente: OpenInsider + SEC Form 4")
+    for i, ins in enumerate(top6[:6], 1):
+        try: send(AUTHORIZED_CHAT, formato_insider(ins, i)); time.sleep(0.5)
+        except Exception as e: log.error(f"insider msg {i}: {e}")
+    send(AUTHORIZED_CHAT, "🔗 <b>Ver todos:</b>\n• <a href='http://openinsider.com/screener?fd=30&vl=100&xp=1'>OpenInsider +100k</a>\n• <a href='https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=4'>SEC Form 4</a>")
+
+def get_squeeze_claude(tickers_raw):
+    try:
+        prompt = f"""Sos analista especializado en short squeeze. Analizá estos tickers con alto short interest:
+{json.dumps(tickers_raw[:10], indent=2)}
+Seleccioná los 5 mejores candidatos a short squeeze. Priorizá: borrow rate >30%, días cubrir >3, catalizador concreto próximo.
+Respondé SOLO con JSON array sin texto extra:
+[{{"ticker":"X","short_float_pct":25.5,"dias_para_cubrir":3.2,"borrow_rate_pct":45.0,"catalizar":"Earnings 15/05","estrategia_entrada":"Compra sobre $18.50 stop $16 target $24","riesgo_squeeze_fallido":"Si earnings decepciona cae 20%","sentiment":"Retail activo en WSB","fuente_url":"https://finviz.com/quote.ashx?t=X"}}]"""
+        res = requests.post("https://api.anthropic.com/v1/messages",
+            headers={"x-api-key":ANTHROPIC_KEY,"anthropic-version":"2023-06-01","content-type":"application/json"},
+            json={"model":"claude-haiku-4-5-20251001","max_tokens":2500,"messages":[{"role":"user","content":prompt}]},
+            timeout=30)
+        data = res.json()
+        if "content" not in data: return []
+        raw = re.sub(r"```json|```","",data["content"][0]["text"]).strip()
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, list) else []
+    except Exception as e: log.error(f"get_squeeze_claude: {e}"); return []
+
+def enviar_screener_squeeze():
+    import time
+    log.info("Buscando short squeeze...")
+    tickers_raw = [
+        {"ticker":"CVNA","short_float":"~25%"},{"ticker":"BYND","short_float":"~30%"},
+        {"ticker":"UPST","short_float":"~28%"},{"ticker":"RIVN","short_float":"~22%"},
+        {"ticker":"PLUG","short_float":"~35%"},{"ticker":"SOFI","short_float":"~20%"},
+        {"ticker":"MSTR","short_float":"~24%"},{"ticker":"COIN","short_float":"~21%"},
+        {"ticker":"HOOD","short_float":"~18%"},{"ticker":"IONQ","short_float":"~26%"},
+    ]
+    try:
+        url = "http://openinsider.com/screener?s=&o=&pl=&ph=&ll=&lh=&fd=30&fdr=&td=0"
+        r = requests.get(f"https://finviz.com/screener.ashx?v=111&f=sh_short_o20&o=-short", headers={**HEADERS_HTTP,"Referer":"https://finviz.com/"}, timeout=15)
+        soup = BeautifulSoup(r.text, "html.parser")
+        finviz_tickers = [{"ticker":el.get_text(strip=True),"short_float":"Finviz >20%"} for el in soup.select("td.screener-short, a.tab-link")[:15] if len(el.get_text(strip=True)) <= 5]
+        if finviz_tickers: tickers_raw = finviz_tickers + tickers_raw
+    except Exception as e: log.warning(f"Finviz squeeze: {e}")
+    top5 = get_squeeze_claude(tickers_raw)
+    if not top5:
+        send(AUTHORIZED_CHAT, "🔥 <b>Short Squeeze Screener</b>\n\n😴 Sin candidatos fuertes hoy.\n🔗 <a href='https://finviz.com/screener.ashx?v=111&f=sh_short_o20'>Ver Finviz</a>")
+        return
+    send(AUTHORIZED_CHAT, f"🔥 <b>Short Squeeze Screener — {datetime.now().strftime('%d/%m/%Y')}</b>\nShort Float >20% | Borrow rate elevado | Catalizador próximo\nFuentes: Finviz + ShortQuote + SEC")
+    for i, sq in enumerate(top5[:5], 1):
+        try:
+            ticker=sq.get("ticker","?"); short_pct=sq.get("short_float_pct","?"); dias=sq.get("dias_para_cubrir","?")
+            borrow=sq.get("borrow_rate_pct","?"); catalizar=sq.get("catalizar","?")
+            estrategia=sq.get("estrategia_entrada","?"); riesgo=sq.get("riesgo_squeeze_fallido","?")
+            sentiment=sq.get("sentiment",""); url=sq.get("fuente_url",f"https://finviz.com/quote.ashx?t={ticker}")
+            emoji = "🔥" if i==1 else ("⚡" if i==2 else "📌")
+            msg = (f"{emoji} <b>#{i} {ticker}</b>\n"
+                   f"📊 Short: <b>{short_pct}%</b> | Días cubrir: <b>{dias}</b> | Borrow: <b>{borrow}%</b>\n"
+                   f"⚡ Catalizador: {catalizar}\n🎯 Entrada: {estrategia}\n⚠️ Riesgo: {riesgo}\n"
+                   + (f"💬 {sentiment}\n" if sentiment else "")
+                   + f"🔗 <a href='{url}'>Ver en Finviz</a>")
+            send(AUTHORIZED_CHAT, msg); time.sleep(0.8)
+        except Exception as e: log.error(f"squeeze msg {i}: {e}")
+    send(AUTHORIZED_CHAT, "🔗 <b>Fuentes:</b>\n• <a href='https://finviz.com/screener.ashx?v=111&f=sh_short_o20'>Finviz Short >20%</a>\n• <a href='https://shortquote.com'>ShortQuote.com</a>")
+
+
 def alertas_loop():
     import time
     log.info("🏠 Alertas inmobiliarias iniciadas")

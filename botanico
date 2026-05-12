@@ -571,8 +571,33 @@ def main():
             if chat_id != AUTHORIZED_CHAT: send(chat_id, "⛔ No autorizado."); continue
             log.info(f"Msg: {texto}")
 
-            if texto.startswith("/start") or texto.startswith("/ayuda"):
+            if texto.startswith("/") and not any(texto.startswith(c) for c in ["/start","/ayuda","/deptos","/insiders","/reset","/squeeze","/botanico","/saldo"]):
+                send(chat_id, "⏳ Procesando...")
+                op = parsear(texto)
+                if not op or not op.get("valido"): send(chat_id, "❓ No entendí.\nEjemplo: <i>vendí 1000 usd a 1280 gané 5000</i>")
+                else:
+                    try:
+                        calc = registrar(op, state); save_state(state); send(chat_id, msg_confirmacion(op, calc))
+                    except Exception as e: log.error(f"registrar: {e}"); send(chat_id, f"⚠️ Error: {e}")
+            elif texto.startswith("/start") or texto.startswith("/ayuda"):
                 send(chat_id, "🤖 <b>Bot Topirri</b>\n\n<b>💱 Casa de cambio:</b>\n• <i>vendí 5000 usd a 1280</i>\n• <i>compré 200 euros a Juan a 1390 gané 3000</i>\n\n<b>🏠 Inmuebles:</b>\n• /deptos — oportunidades Palermo Chico\n\n/saldo — saldo USD en caja\n/ayuda — este mensaje")
+            elif texto.startswith("/botanico"):
+                send(chat_id, "🌿 Buscando en Rep. Árabe Siria, Arenales, Juncal, Beruti y Rep. de la India...")
+                try:
+                    import time
+                    props = scrape_botanico()
+                    seen = load_seen(); nuevas = []
+                    for p in props:
+                        if p["id"] not in seen:
+                            seen.add(p["id"])
+                            p["motivo"] = f"📍 {p.get('calle','Zona Botánico')}"
+                            nuevas.append(p)
+                    save_seen(seen)
+                    if not nuevas: send(chat_id, "😴 Sin publicaciones nuevas en esas calles.")
+                    else:
+                        send(chat_id, f"🌿 <b>{len(nuevas)} publicación(es) nueva(s) zona Botánico</b>")
+                        for p in nuevas[:8]: send(chat_id, msg_depto(p)); time.sleep(0.5)
+                except Exception as e: log.error(f"botanico: {e}"); send(chat_id, f"⚠️ Error: {e}")
             elif texto.startswith("/deptos"):
                 send(chat_id, "🔍 Buscando oportunidades en Palermo Chico...")
                 nuevas = check_propiedades()
@@ -607,26 +632,9 @@ def main():
                 except Exception as e:
                     log.error(f"squeeze cmd: {e}")
                     send(chat_id, f"⚠️ Error: {e}")
-            elif texto.startswith("/botanico"):
-                send(chat_id, "🌿 Buscando en Rep. Árabe Siria, Arenales, Juncal, Beruti y Rep. de la India...")
-                try:
-                    import time
-                    props = scrape_botanico()
-                    seen = load_seen(); nuevas = []
-                    for p in props:
-                        if p["id"] not in seen:
-                            seen.add(p["id"])
-                            p["motivo"] = f"📍 {p.get('calle','Zona Botánico')}"
-                            nuevas.append(p)
-                    save_seen(seen)
-                    if not nuevas: send(chat_id, "😴 Sin publicaciones nuevas en esas calles.")
-                    else:
-                        send(chat_id, f"🌿 <b>{len(nuevas)} publicación(es) nueva(s) zona Botánico</b>")
-                        for p in nuevas[:8]: send(chat_id, msg_depto(p)); time.sleep(0.5)
-                except Exception as e: log.error(f"botanico: {e}"); send(chat_id, f"⚠️ Error: {e}")
             elif texto.startswith("/saldo"):
                 send(chat_id, f"🏦 <b>Saldo USD:</b> {state['saldo_usd']:,.2f}\n📊 Operaciones: {state['op_counter']}")
-            else:
+            elif not texto.startswith("/"):
                 send(chat_id, "⏳ Procesando...")
                 op = parsear(texto)
                 if not op or not op.get("valido"): send(chat_id, "❓ No entendí.\nEjemplo: <i>vendí 1000 usd a 1280 gané 5000</i>")
